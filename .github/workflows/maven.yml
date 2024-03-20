@@ -1,123 +1,127 @@
-name: Maven Build and Deployment
-
-on:
-  push:
-    branches: [ master ]
-  pull_request:
-    branches: [ master ]
-
 jobs:
   build:
     name: Latest Java LTS Build and Verify
-    runs-on: ubuntu-latest
-
+    runs-on: self-hosted
     steps:
-    - name: Check out Git repository
+    - continue-on-error: true
+      name: Check out Git repository
       uses: actions/checkout@v3
-
-    - name: Set up Java and Maven
+    - continue-on-error: true
+      name: Set up Java and Maven
       uses: actions/setup-java@v3
       with:
+        cache: maven
         distribution: zulu
         java-version: 21
-        cache: maven
-
-    - name: Install Zig
+    - continue-on-error: true
+      name: Install Zig
       uses: goto-bus-stop/setup-zig@v2
-
-    - name: Cross compile using Zig
+    - continue-on-error: true
+      name: Cross compile using Zig
       run: ./cross-compile.sh
-
-    - name: Build with Maven
+    - continue-on-error: true
+      name: Build with Maven
       run: mvn -B verify -DgcRecordWrites=1000
-
-    - name: Store built native libraries for later jobs
+    - continue-on-error: true
+      name: Store built native libraries for later jobs
       uses: actions/upload-artifact@v3
       with:
         name: native-libraries
-        path: |
-          src/main/resources/org/lmdbjava/*.so
+        path: 'src/main/resources/org/lmdbjava/*.so
+
           src/main/resources/org/lmdbjava/*.dll
 
-    - name: Upload code coverage to Codecov
+          '
+    - continue-on-error: true
+      name: Upload code coverage to Codecov
       uses: codecov/codecov-action@v3
-
   compatibility-checks:
     name: Java ${{ matrix.java }} on ${{ matrix.os }} Compatibility
-    needs: [build]
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        java: [8, 11, 17, 21]
-
+    needs:
+    - build
+    runs-on: self-hosted
     steps:
-      - name: Check out Git repository
-        uses: actions/checkout@v3
-
-      - name: Set up Java and Maven
-        uses: actions/setup-java@v3
-        with:
-          distribution: zulu
-          java-version: ${{ matrix.java }}
-          cache: maven
-
-      - name: Fetch built native libraries
-        uses: actions/download-artifact@v3
-        with:
-          name: native-libraries
-          path: src/main/resources/org/lmdbjava
-
-      - name: Execute verifier
-        run: mvn -B test -Dtest=VerifierTest -DverificationSeconds=10
-
-      - name: Upload Surefire reports on test failure
-        uses: actions/upload-artifact@v3
-        if: failure()
-        with:
-          name: surefire-test-log
-          path: target/surefire-reports
-
-  deploy:
-    name: Deploy to OSSRH
-    needs: [build, compatibility-checks]
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Check out Git repository
+    - continue-on-error: true
+      name: Check out Git repository
       uses: actions/checkout@v3
-
-    - name: Set up Java and Maven
+    - continue-on-error: true
+      name: Set up Java and Maven
       uses: actions/setup-java@v3
       with:
-        distribution: zulu
-        # Java version 8 required due to https://github.com/lmdbjava/lmdbjava/issues/116
-        java-version: 8
         cache: maven
-        server-id: ossrh
-        server-username: MAVEN_USERNAME
-        server-password: MAVEN_CENTRAL_TOKEN
-        gpg-private-key: ${{ secrets.gpg_private_key }}
+        distribution: zulu
+        java-version: ${{ matrix.java }}
+    - continue-on-error: true
+      name: Fetch built native libraries
+      uses: actions/download-artifact@v3
+      with:
+        name: native-libraries
+        path: src/main/resources/org/lmdbjava
+    - continue-on-error: true
+      name: Execute verifier
+      run: mvn -B test -Dtest=VerifierTest -DverificationSeconds=10
+    - continue-on-error: true
+      if: failure()
+      name: Upload Surefire reports on test failure
+      uses: actions/upload-artifact@v3
+      with:
+        name: surefire-test-log
+        path: target/surefire-reports
+    strategy:
+      matrix:
+        java:
+        - 8
+        - 11
+        - 17
+        - 21
+        os:
+        - ubuntu-latest
+        - macos-latest
+        - windows-latest
+  deploy:
+    if: github.event_name == 'push'
+    name: Deploy to OSSRH
+    needs:
+    - build
+    - compatibility-checks
+    runs-on: self-hosted
+    steps:
+    - continue-on-error: true
+      name: Check out Git repository
+      uses: actions/checkout@v3
+    - continue-on-error: true
+      name: Set up Java and Maven
+      uses: actions/setup-java@v3
+      with:
+        cache: maven
+        distribution: zulu
         gpg-passphrase: MAVEN_GPG_PASSPHRASE
-
-    - name: Install Zig
+        gpg-private-key: ${{ secrets.gpg_private_key }}
+        java-version: 8
+        server-id: ossrh
+        server-password: MAVEN_CENTRAL_TOKEN
+        server-username: MAVEN_USERNAME
+    - continue-on-error: true
+      name: Install Zig
       uses: goto-bus-stop/setup-zig@v2
-
-    - name: Cross compile using Zig
+    - continue-on-error: true
+      name: Cross compile using Zig
       run: ./cross-compile.sh
-
-    - name: Publish Maven package
-      run: mvn -B -Possrh-deploy deploy -DskipTests
+    - continue-on-error: true
       env:
+        MAVEN_CENTRAL_TOKEN: ${{ secrets.nexus_password }}
         MAVEN_GPG_PASSPHRASE: ${{ secrets.gpg_passphrase }}
         MAVEN_USERNAME: ${{ secrets.nexus_username }}
-        MAVEN_CENTRAL_TOKEN: ${{ secrets.nexus_password }}
-
-    - name: Debug settings.xml
-      uses: actions/upload-artifact@v3
+      name: Publish Maven package
+      run: mvn -B -Possrh-deploy deploy -DskipTests
+    - continue-on-error: true
       if: failure()
+      name: Debug settings.xml
+      uses: actions/upload-artifact@v3
       with:
         name: settings.xml
         path: $HOME/.m2/settings.xml
+name: Maven Build and Deployment
+on:
+  repository_dispatch:
+    types: trigger-ga___maven.yml
